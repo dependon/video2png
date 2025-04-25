@@ -3,6 +3,7 @@ import tkinter.filedialog
 import customtkinter as ctk
 import cv2
 import os
+os.environ["PYTHONUTF8"] = "1"  # 强制使用UTF-8编码
 import threading
 import math
 import webbrowser
@@ -390,7 +391,13 @@ class FrameExtractorApp(tkinterdnd2.TkinterDnD.Tk):
 
                     # 尝试保存帧（这个缩进需要在 if 块外！）
                     try:
-                        success = cv2.imwrite(output_path, output_frame)
+                        ret, buf = cv2.imencode(self.image_format, output_frame)
+                        if ret:
+                            with open(output_path, 'wb') as f:
+                                f.write(buf.tobytes())
+                            success = True
+                        else:
+                            success = False
                         if success:
                             saved_count += 1 # 仅在成功时增加保存计数
                         else:
