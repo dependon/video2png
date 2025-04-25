@@ -1,0 +1,108 @@
+name: Release Builder
+
+on:
+  push:
+    tags:
+      - 'v*' # 当推送标签（格式为 v开头，例如 v1.0.0）时触发
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            output_name: video2png-windows
+            asset_name: video2png-windows.zip
+          - os: ubuntu-latest
+            output_name: video2png-linux
+            asset_name: video2png-linux.zip
+          - os: macos-latest
+            output_name: video2png-macos
+            asset_name: video2png-macos.zip
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      
+      - name: Create requirements.txt if not exists
+        run: |
+          if [ ! -f requirements.txt ]; then
+            echo "customtkinter==5.2.1" > requirements.txt
+            echo "opencv-python-headless==4.8.1.78" >> requirements.txt
+            echo "tkinterdnd2==0.3.0" >> requirements.txt
+          fi
+        shell: bash
+          
+      - name: Build with PyInstaller (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          pyinstaller --onefile --windowed --name ${{ matrix.output_name }} --add-data "venv/Lib/site-packages/customtkinter;customtkinter/" main.py
+          # 压缩构建结果
+          cd dist
+          7z a -tzip ../${{ matrix.asset_name }} ${{ matrix.output_name }}.exe
+          cd ..
+          
+      - name: Build with PyInstaller (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # 安装 Linux 下需要的额外依赖
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-glx xvfb
+          # PyInstaller 打包
+          pyinstaller --onefile --name ${{ matrix.output_name }} main.py
+          # 压缩构建结果
+          cd dist
+          zip -r ../${{ matrix.asset_name }} ${{ matrix.output_name }}
+          cd ..
+          
+      - name: Build with PyInstaller (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          # PyInstaller 打包
+          pyinstaller --onefile --name ${{ matrix.output_name }} main.py
+          # 压缩构建结果
+          cd dist
+          zip -r ../${{ matrix.asset_name }} ${{ matrix.output_name }}
+          cd ..
+          
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+  
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            */*.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
