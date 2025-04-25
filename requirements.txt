@@ -1,4 +1,4 @@
-customtkinter==5.2.1
-opencv-python-headless==4.8.1.78
+customtkinter
+opencv-python-headless
 Pillow
-tkinterdnd2==0.3.0
+tkinterdnd2
