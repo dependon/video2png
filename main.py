@@ -6,15 +6,20 @@ import os
 import threading
 import math
 import webbrowser
+import tkinterdnd2
 
 # --- 主应用类 ---
-class FrameExtractorApp(ctk.CTk):
+class FrameExtractorApp(tkinterdnd2.TkinterDnD.Tk):
     def __init__(self):
-        super().__init__()
+        tkinterdnd2.TkinterDnD.Tk.__init__(self)
+
+        # --- 设置深色主题 ---
+        ctk.set_appearance_mode("Dark") # 设置 CTk 组件为深色模式
+        self.configure(bg="#242424")      # 设置主窗口背景为深灰色
+        # --- -------- ---
 
         self.title("视频帧提取器")
-        self.geometry("650x580") # 调整窗口大小以容纳新控件
-        ctk.set_appearance_mode("System")
+        self.geometry("650x700") # 增加窗口高度以容纳日志框
         ctk.set_default_color_theme("blue")
 
         self.video_path = ""
@@ -39,6 +44,10 @@ class FrameExtractorApp(ctk.CTk):
         self.button_browse_video.grid(row=current_row, column=2, padx=10, pady=(10, 5))
         current_row += 1
 
+        # 注册视频输入框为拖拽目标
+        self.entry_video_path.drop_target_register(tkinterdnd2.DND_FILES)
+        self.entry_video_path.dnd_bind('<<Drop>>', self.on_drop_video)
+
         # 1.5 显示原始分辨率
         self.label_original_res_info = ctk.CTkLabel(self, text="原始分辨率:")
         self.label_original_res_info.grid(row=current_row, column=0, padx=10, pady=(0, 10), sticky="w")
@@ -54,6 +63,10 @@ class FrameExtractorApp(ctk.CTk):
         self.button_browse_output = ctk.CTkButton(self, text="浏览...", command=self.select_output_dir)
         self.button_browse_output.grid(row=current_row, column=2, padx=10, pady=10)
         current_row += 1
+
+        # 注册输出目录输入框为拖拽目标
+        self.entry_output_dir.drop_target_register(tkinterdnd2.DND_FILES)
+        self.entry_output_dir.dnd_bind('<<Drop>>', self.on_drop_output)
 
         # 3. 提取模式选择
         self.label_mode = ctk.CTkLabel(self, text="提取模式:")
@@ -120,9 +133,20 @@ class FrameExtractorApp(ctk.CTk):
         # 8. 状态标签
         self.label_status = ctk.CTkLabel(self, text="请选择视频和输出目录")
         self.label_status.grid(row=current_row, column=0, columnspan=3, padx=20, pady=(0, 10), sticky="w")
+        current_row += 1
 
-        current_row += 1 # 移到下一行准备放超链接
+        # 9. 日志框
+        self.log_textbox = ctk.CTkTextbox(self, height=120, state=tkinter.DISABLED) # 初始化为禁用状态
+        self.log_textbox.grid(row=current_row, column=0, columnspan=3, padx=20, pady=(5, 5), sticky="nsew")
+        self.grid_rowconfigure(current_row, weight=1) # 让日志框能够扩展
+        current_row += 1
 
+        # 10. 清空日志按钮
+        self.button_clear_log = ctk.CTkButton(self, text="清空日志", width=100, command=self.clear_log)
+        self.button_clear_log.grid(row=current_row, column=2, padx=20, pady=(0, 5), sticky="e") # 靠右对齐
+        current_row += 1
+
+        # 11. GitHub 链接 (调整行号)
         self.label_github = ctk.CTkLabel(
             self,
             text=self.github_url,
@@ -327,11 +351,15 @@ class FrameExtractorApp(ctk.CTk):
             # 读取一次原始分辨率以防万一（虽然应该在选择文件时已经获取）
             original_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             original_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            self.update_status(f"视频信息: {original_w}x{original_h}, 共 {total_frames} 帧, FPS: {fps:.2f}")
+            # 状态更新提前，避免被循环内的覆盖
+            self.update_status(f"视频信息: {original_w}x{original_h}, 共 {total_frames} 帧, FPS: {fps:.2f}. 开始处理...")
 
+            # 测试日志功能
+            self.log_message("开始处理视频，请查看此处了解处理过程中的警告和错误。")
 
             frame_count = 0
             saved_count = 0
+            write_failures = 0 # <-- 初始化写入失败计数器
             step = 1 if mode == 0 else interval
 
             while True:
@@ -343,7 +371,9 @@ class FrameExtractorApp(ctk.CTk):
 
                 # 检查是否需要保存此帧
                 if (frame_count - 1) % step == 0:
-                    saved_count += 1
+                    # 注意：保存的帧的文件名从 frame_000000 开始
+                    filename = f"frame_{saved_count:06d}{self.image_format}"
+                    output_path = os.path.join(output_dir, filename)
                     output_frame = frame # 默认使用原始帧
 
                     # 如果需要，调整帧大小
@@ -352,36 +382,44 @@ class FrameExtractorApp(ctk.CTk):
                             # 使用INTER_AREA进行缩放，通用性较好
                             output_frame = cv2.resize(frame, (output_width, output_height), interpolation=cv2.INTER_AREA)
                         except Exception as resize_error:
-                            print(f"警告：调整帧 {frame_count} 大小时出错: {resize_error}")
-                            # 可以选择跳过此帧或保存原始帧
-                            # 这里选择继续尝试保存调整后的帧（如果resize成功但imwrite失败）或跳过（如果resize失败）
-                            # 如果希望即使resize失败也保存原始帧，可以将 output_frame = frame 放在 try 外部
+                            self.log_message(f"警告：调整帧 {frame_count} 大小时出错: {resize_error}")
+                            # 调整大小失败，可以选择跳过或尝试保存原始帧
+                            # 这里选择跳过此帧的保存
+                            write_failures += 1 # 计入失败
+                            continue # 跳过此帧的保存尝试
 
-                    # 构建文件名并保存
-                    filename = f"frame_{saved_count:06d}{self.image_format}"
-                    output_path = os.path.join(output_dir, filename)
-
+                    # 尝试保存帧（这个缩进需要在 if 块外！）
                     try:
                         success = cv2.imwrite(output_path, output_frame)
-                        if not success:
-                            print(f"警告：无法写入帧 {frame_count} 到 {output_path}")
+                        if success:
+                            saved_count += 1 # 仅在成功时增加保存计数
+                        else:
+                            write_failures += 1 # 增加写入失败计数
+                            self.log_message(f"警告：无法写入帧 {frame_count} 到 {output_path}")
                     except Exception as write_error:
-                        print(f"警告：写入帧 {frame_count} 到 {output_path} 时发生异常: {write_error}")
+                        write_failures += 1 # 增加写入失败计数
+                        self.log_message(f"警告：写入帧 {frame_count} 到 {output_path} 时发生异常: {write_error}")
                         # 考虑是否需要更强的错误处理，例如停止进程
 
-                # 更新进度条和状态
+                # 更新进度条和状态 (简化状态更新，避免覆盖过多信息)
                 if frame_count % max(1, total_frames // 100) == 0 or frame_count == total_frames:
                     progress = frame_count / total_frames
                     self.update_progress(progress)
-                    self.update_status(f"处理中: {frame_count}/{total_frames}帧 | 已保存: {saved_count}帧")
+                    # 在循环中可以只更新处理进度，最终结果在循环外显示
+                    self.update_status(f"处理中: {frame_count}/{total_frames} 帧...")
 
             # 确保进度条最终为100%
             self.update_progress(1.0)
             resolution_info = f"{output_width}x{output_height}" if use_custom_res else "原始分辨率"
-            self.update_status(f"提取完成！共处理 {frame_count} 帧，成功保存 {saved_count} 帧 ({resolution_info}) 到 {output_dir}")
+            # 构建最终状态消息
+            final_status = f"提取完成！共处理 {frame_count} 帧，成功保存 {saved_count} 帧 ({resolution_info}) 到 {output_dir}"
+            if write_failures > 0:
+                final_status += f" ({write_failures} 帧写入失败)" # <-- 添加失败计数信息
+                self.log_message(f"总计: {write_failures} 帧写入失败")
+            self.update_status(final_status)
 
         except Exception as e:
-            self.update_status(f"提取过程中发生错误: {e}")
+            self.log_message(f"严重错误：提取过程中发生错误: {e}")
             self.update_progress(0) # 出错时重置或保持进度
         finally:
             if cap is not None and cap.isOpened():
@@ -389,19 +427,68 @@ class FrameExtractorApp(ctk.CTk):
             # 无论成功还是失败，都要重新启用 UI
             self.set_ui_state(True)
 
-        # --- 新增：打开 GitHub 链接的回调 ---
+    # --- 新增：拖拽处理回调函数 ---
+    def on_drop_video(self, event):
+        """处理视频文件拖拽事件"""
+        # event.data 通常包含文件路径，可能被 {} 包裹，需要清理
+        path = event.data.strip()
+        if path.startswith('{') and path.endswith('}'):
+            path = path[1:-1]
+
+        # 检查路径是否为有效文件
+        if os.path.isfile(path):
+            self.video_path = path
+            self.entry_video_path.delete(0, tkinter.END)
+            self.entry_video_path.insert(0, self.video_path)
+            self.update_status(f"已拖入视频: {os.path.basename(self.video_path)}")
+            self.get_video_resolution(self.video_path)
+        else:
+            self.update_status(f"错误：拖入的不是有效的文件路径: {path}")
+
+    def on_drop_output(self, event):
+        """处理输出目录拖拽事件"""
+        path = event.data.strip()
+        if path.startswith('{') and path.endswith('}'):
+            path = path[1:-1]
+
+        # 检查路径是否为有效目录
+        if os.path.isdir(path):
+            self.output_dir = path
+            self.entry_output_dir.delete(0, tkinter.END)
+            self.entry_output_dir.insert(0, self.output_dir)
+            self.update_status(f"已拖入输出目录: {self.output_dir}")
+        else:
+            self.update_status(f"错误：拖入的不是有效的目录路径: {path}")
+
+    # --- 新增：打开 GitHub 链接的回调 ---
     def open_github_link(self, event=None): # event 参数是 bind 传过来的，可以不用
         """在默认浏览器中打开 GitHub 仓库链接"""
         try:
             webbrowser.open_new_tab(self.github_url)
             self.update_status(f"正在打开: {self.github_url}") # 给用户反馈
         except Exception as e:
-            self.update_status(f"无法打开链接: {e}")
-            print(f"Error opening URL: {e}") # 在控制台打印错误
+            self.log_message(f"错误：无法打开链接: {e}") # <-- 输出到日志框
+            print(f"Error opening URL: {e}") # 在控制台打印错误（可选保留）
+
+    # --- 新增：日志记录和清空方法 ---
+    def log_message(self, message):
+        """安全地向日志框追加消息"""
+        def _update_log():
+            self.log_textbox.configure(state=tkinter.NORMAL) # 启用以编辑
+            self.log_textbox.insert(tkinter.END, message + "\n") # 追加消息和换行符
+            self.log_textbox.see(tkinter.END) # 滚动到底部
+            self.log_textbox.configure(state=tkinter.DISABLED) # 禁用以防用户编辑
+        self.after(0, _update_log) # 确保在主线程执行 GUI 更新
+
+    def clear_log(self):
+        """清空日志框内容"""
+        def _clear():
+            self.log_textbox.configure(state=tkinter.NORMAL)
+            self.log_textbox.delete("1.0", tkinter.END)
+            self.log_textbox.configure(state=tkinter.DISABLED)
+        self.after(0, _clear)
 
 # --- 启动应用 ---
 if __name__ == "__main__":
-    # GitHub项目地址：https://github.com/dependon/video2png
     app = FrameExtractorApp()
     app.mainloop()
-    # GitHub项目地址：https://github.com/dependon/video2png
