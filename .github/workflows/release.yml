@@ -15,13 +15,13 @@ jobs:
         include:
           - os: windows-latest
             output_name: video2png-windows
-            asset_name: video2png-windows.zip
+            asset_name: video2png-windows.exe
           - os: ubuntu-latest
             output_name: video2png-linux
-            asset_name: video2png-linux.zip
+            asset_name: video2png-linux
           - os: macos-latest
             output_name: video2png-macos
-            asset_name: video2png-macos.zip
+            asset_name: video2png-macos
     
     steps:
       - name: Checkout code
@@ -30,7 +30,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.9'
           
       - name: Install dependencies
         run: |
@@ -56,10 +56,8 @@ jobs:
           
           # 使用实际路径进行打包，Windows使用分号分隔路径
           pyinstaller --onefile --windowed --name ${{ matrix.output_name }} --add-data "$CTK_PATH;customtkinter" main.py
-          # 压缩构建结果
-          cd dist
-          7z a -tzip ../${{ matrix.asset_name }} ${{ matrix.output_name }}.exe
-          cd ..
+          # 移动构建结果
+          mv dist/${{ matrix.output_name }}.exe .
           
       - name: Build with PyInstaller (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -72,10 +70,8 @@ jobs:
           echo "找到customtkinter路径: $CTK_PATH"
           # PyInstaller 打包 (Linux使用冒号分隔路径)
           pyinstaller --onefile --name ${{ matrix.output_name }} --add-data "$CTK_PATH:customtkinter" main.py
-          # 压缩构建结果
-          cd dist
-          zip -r ../${{ matrix.asset_name }} ${{ matrix.output_name }}
-          cd ..
+          # 移动构建结果
+          mv dist/${{ matrix.output_name }} .
           
       - name: Build with PyInstaller (macOS)
         if: matrix.os == 'macos-latest'
@@ -85,10 +81,8 @@ jobs:
           echo "找到customtkinter路径: $CTK_PATH"
           # PyInstaller 打包 (macOS使用冒号分隔路径)
           pyinstaller --onefile --name ${{ matrix.output_name }} --add-data "$CTK_PATH:customtkinter" main.py
-          # 压缩构建结果
-          cd dist
-          zip -r ../${{ matrix.asset_name }} ${{ matrix.output_name }}
-          cd ..
+          # 移动构建结果
+          mv dist/${{ matrix.output_name }} .
           
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -114,7 +108,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            */*.zip
+            *.exe
+            video2png-*
           draft: false
           prerelease: false
         env:
