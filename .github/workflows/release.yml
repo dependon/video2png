@@ -50,10 +50,12 @@ jobs:
       - name: Build with PyInstaller (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          # 获取Python包的实际路径
-          $SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
-          # 使用实际路径进行打包
-          pyinstaller --onefile --windowed --name ${{ matrix.output_name }} --add-data "$SITE_PACKAGES/customtkinter;customtkinter/" main.py
+          # 直接使用Python导入模块来获取customtkinter的确切路径
+          $CTK_PATH = (python -c "import customtkinter, os; print(os.path.dirname(customtkinter.__file__))")
+          Write-Host "找到customtkinter路径: $CTK_PATH"
+          
+          # 使用实际路径进行打包，Windows使用分号分隔路径
+          pyinstaller --onefile --windowed --name ${{ matrix.output_name }} --add-data "$CTK_PATH;customtkinter" main.py
           # 压缩构建结果
           cd dist
           7z a -tzip ../${{ matrix.asset_name }} ${{ matrix.output_name }}.exe
@@ -65,10 +67,11 @@ jobs:
           # 安装 Linux 下需要的额外依赖
           sudo apt-get update
           sudo apt-get install -y xvfb
-          # 获取Python包的实际路径
-          SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
-          # PyInstaller 打包
-          pyinstaller --onefile --name ${{ matrix.output_name }} --add-data "$SITE_PACKAGES/customtkinter:customtkinter/" main.py
+          # 直接使用Python导入模块来获取customtkinter的确切路径
+          CTK_PATH=$(python -c "import customtkinter, os; print(os.path.dirname(customtkinter.__file__))")
+          echo "找到customtkinter路径: $CTK_PATH"
+          # PyInstaller 打包 (Linux使用冒号分隔路径)
+          pyinstaller --onefile --name ${{ matrix.output_name }} --add-data "$CTK_PATH:customtkinter" main.py
           # 压缩构建结果
           cd dist
           zip -r ../${{ matrix.asset_name }} ${{ matrix.output_name }}
@@ -77,10 +80,11 @@ jobs:
       - name: Build with PyInstaller (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          # 获取Python包的实际路径
-          SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
-          # PyInstaller 打包
-          pyinstaller --onefile --name ${{ matrix.output_name }} --add-data "$SITE_PACKAGES/customtkinter:customtkinter/" main.py
+          # 直接使用Python导入模块来获取customtkinter的确切路径
+          CTK_PATH=$(python -c "import customtkinter, os; print(os.path.dirname(customtkinter.__file__))")
+          echo "找到customtkinter路径: $CTK_PATH"
+          # PyInstaller 打包 (macOS使用冒号分隔路径)
+          pyinstaller --onefile --name ${{ matrix.output_name }} --add-data "$CTK_PATH:customtkinter" main.py
           # 压缩构建结果
           cd dist
           zip -r ../${{ matrix.asset_name }} ${{ matrix.output_name }}
