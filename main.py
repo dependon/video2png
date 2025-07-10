@@ -3,6 +3,7 @@ import tkinter.filedialog
 import customtkinter as ctk
 import cv2
 import os
+os.environ["PYTHONUTF8"] = "1"  # 强制使用UTF-8编码
 import threading
 import math
 import webbrowser

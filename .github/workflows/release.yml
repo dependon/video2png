@@ -1,121 +1,88 @@
-name: Release Builder
+name: Create Release and Build Binaries
 
 on:
   push:
     tags:
-      - 'v*' # 当推送标签（格式为 v开头，例如 v1.0.0）时触发
+      - 'v*' # Trigger on tags like v1.0, v2.1.3
+
+permissions:
+  contents: write # Needed to create releases and upload assets
 
 jobs:
   build:
-    name: Build ${{ matrix.os }}
+    name: Build for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
-          - os: windows-latest
-            output_name: video2png-windows
-            asset_name: video2png-windows.zip
           - os: ubuntu-latest
-            output_name: video2png-linux
-            asset_name: video2png-linux.zip
+            asset_name_suffix: linux
+            pyinstaller_flags: ""
           - os: macos-latest
-            output_name: video2png-macos
-            asset_name: video2png-macos.zip
-    
+            asset_name_suffix: macos
+            pyinstaller_flags: "--windowed" # macOS apps are typically windowed
+          - os: windows-latest
+            asset_name_suffix: windows.exe
+            pyinstaller_flags: "--windowed" # Windows GUI apps need this
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-          
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
-      
-      - name: Create requirements.txt if not exists
-        run: |
-          if [ ! -f requirements.txt ]; then
-            echo "customtkinter==5.2.1" > requirements.txt
-            echo "opencv-python-headless==4.8.1.78" >> requirements.txt
-            echo "tkinterdnd2==0.3.0" >> requirements.txt
-          fi
-        shell: bash
-          
-      - name: Build with PyInstaller (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          # 直接使用Python导入模块来获取customtkinter的确切路径
-          $CTK_PATH = (python -c "import customtkinter, os; print(os.path.dirname(customtkinter.__file__))")
-          Write-Host "找到customtkinter路径: $CTK_PATH"
-          
-          # 使用实际路径进行打包，Windows使用分号分隔路径
-          pyinstaller --onefile --windowed --name ${{ matrix.output_name }} --add-data "$CTK_PATH;customtkinter" main.py
-          # 压缩构建结果
-          cd dist
-          7z a -tzip ../${{ matrix.asset_name }} ${{ matrix.output_name }}.exe
-          cd ..
-          
-      - name: Build with PyInstaller (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          # 安装 Linux 下需要的额外依赖
-          sudo apt-get update
-          sudo apt-get install -y xvfb
-          # 直接使用Python导入模块来获取customtkinter的确切路径
-          CTK_PATH=$(python -c "import customtkinter, os; print(os.path.dirname(customtkinter.__file__))")
-          echo "找到customtkinter路径: $CTK_PATH"
-          # PyInstaller 打包 (Linux使用冒号分隔路径)
-          pyinstaller --onefile --name ${{ matrix.output_name }} --add-data "$CTK_PATH:customtkinter" main.py
-          # 压缩构建结果
-          cd dist
-          zip -r ../${{ matrix.asset_name }} ${{ matrix.output_name }}
-          cd ..
-          
-      - name: Build with PyInstaller (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          # 直接使用Python导入模块来获取customtkinter的确切路径
-          CTK_PATH=$(python -c "import customtkinter, os; print(os.path.dirname(customtkinter.__file__))")
-          echo "找到customtkinter路径: $CTK_PATH"
-          # PyInstaller 打包 (macOS使用冒号分隔路径)
-          pyinstaller --onefile --name ${{ matrix.output_name }} --add-data "$CTK_PATH:customtkinter" main.py
-          # 压缩构建结果
-          cd dist
-          zip -r ../${{ matrix.asset_name }} ${{ matrix.output_name }}
-          cd ..
-          
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}
-  
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9' # Or match project requirement
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build with PyInstaller
+      # Use the correct executable name based on OS suffix
+      run: pyinstaller --onefile ${{ matrix.pyinstaller_flags }} --name video2png-${{ matrix.os }} main.py
+
+    - name: Prepare Artifact Path
+      id: artifact_path
+      run: |
+        if [ "${{ matrix.os }}" == "windows-latest" ]; then
+          echo "path=dist/video2png-${{ matrix.os }}.exe" >> $GITHUB_OUTPUT
+        elif [ "${{ matrix.os }}" == "macos-latest" ]; then
+          # PyInstaller might create an .app bundle on macOS, adjust if needed
+          # Assuming it creates a single executable file for simplicity here
+          echo "path=dist/video2png-${{ matrix.os }}" >> $GITHUB_OUTPUT 
+        else
+          echo "path=dist/video2png-${{ matrix.os }}" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: video2png-${{ matrix.asset_name_suffix }} # Artifact name includes OS suffix
+        path: ${{ steps.artifact_path.outputs.path }} # Use the determined path
+
   release:
-    name: Create Release
-    needs: build
+    name: Create GitHub Release
+    needs: build # Run after all builds are complete
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # Grant permission to create releases
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
       - name: Download all artifacts
         uses: actions/download-artifact@v4
-        
-      - name: Create Release
-        id: create_release
+        with:
+          path: artifacts # Download all artifacts to 'artifacts' directory
+
+      - name: List downloaded files # Debug step
+        run: ls -R artifacts
+
+      - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            */*.zip
-          draft: false
-          prerelease: false
+          # tag_name: ${{ github.ref_name }} # Use the tag that triggered the workflow (default)
+          # name: Release ${{ github.ref_name }} # Default release name is the tag
+          files: artifacts/**/* # Upload all files from all subdirectories in artifacts
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Provided by GitHub Actions
