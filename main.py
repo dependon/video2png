@@ -7,6 +7,7 @@ import threading
 import math
 import webbrowser
 import tkinterdnd2
+import numpy as np
 
 # --- 主应用类 ---
 class FrameExtractorApp(tkinterdnd2.TkinterDnD.Tk):
@@ -108,7 +109,15 @@ class FrameExtractorApp(tkinterdnd2.TkinterDnD.Tk):
         current_row += 1
 
 
-        # 5. 图片格式 (保持简化)
+        # 5. 自定义帧名称前缀
+        self.label_frame_prefix = ctk.CTkLabel(self, text="帧名称前缀:")
+        self.label_frame_prefix.grid(row=current_row, column=0, padx=10, pady=10, sticky="w")
+        self.entry_frame_prefix = ctk.CTkEntry(self, placeholder_text="frame", width=200)
+        self.entry_frame_prefix.grid(row=current_row, column=1, padx=10, pady=10, sticky="w")
+        self.entry_frame_prefix.insert(0, "frame")  # 设置默认值
+        current_row += 1
+
+        # 6. 图片格式 (保持简化)
         self.image_format = ".png"
         # 可以取消注释并调整 current_row 来添加格式选择
         # self.label_format = ctk.CTkLabel(self, text="图片格式:")
@@ -119,34 +128,34 @@ class FrameExtractorApp(tkinterdnd2.TkinterDnD.Tk):
         # current_row += 1
 
 
-        # 6. 开始按钮
+        # 7. 开始按钮
         self.button_start = ctk.CTkButton(self, text="开始提取", command=self.start_extraction_thread)
         self.button_start.grid(row=current_row, column=0, columnspan=3, padx=20, pady=20)
         current_row += 1
 
-        # 7. 进度条
+        # 8. 进度条
         self.progress_bar = ctk.CTkProgressBar(self, orientation="horizontal", mode="determinate")
         self.progress_bar.grid(row=current_row, column=0, columnspan=3, padx=20, pady=(0, 10), sticky="ew")
         self.progress_bar.set(0)
         current_row += 1
 
-        # 8. 状态标签
+        # 9. 状态标签
         self.label_status = ctk.CTkLabel(self, text="请选择视频和输出目录")
         self.label_status.grid(row=current_row, column=0, columnspan=3, padx=20, pady=(0, 10), sticky="w")
         current_row += 1
 
-        # 9. 日志框
+        # 10. 日志框
         self.log_textbox = ctk.CTkTextbox(self, height=120, state=tkinter.DISABLED) # 初始化为禁用状态
         self.log_textbox.grid(row=current_row, column=0, columnspan=3, padx=20, pady=(5, 5), sticky="nsew")
         self.grid_rowconfigure(current_row, weight=1) # 让日志框能够扩展
         current_row += 1
 
-        # 10. 清空日志按钮
+        # 11. 清空日志按钮
         self.button_clear_log = ctk.CTkButton(self, text="清空日志", width=100, command=self.clear_log)
         self.button_clear_log.grid(row=current_row, column=2, padx=20, pady=(0, 5), sticky="e") # 靠右对齐
         current_row += 1
 
-        # 11. GitHub 链接 (调整行号)
+        # 12. GitHub 链接 (调整行号)
         self.label_github = ctk.CTkLabel(
             self,
             text=self.github_url,
@@ -250,6 +259,7 @@ class FrameExtractorApp(tkinterdnd2.TkinterDnD.Tk):
         self.after(0, lambda s=state: self.radio_all.configure(state=s))
         self.after(0, lambda s=state: self.radio_interval.configure(state=s))
         self.after(0, lambda s=state: self.check_custom_res.configure(state=s))
+        self.after(0, lambda s=state: self.entry_frame_prefix.configure(state=s))
 
         # 只有在间隔模式启用时才控制间隔输入框
         interval_entry_state = state if self.radio_var.get() == 1 and enabled else tkinter.DISABLED
@@ -282,6 +292,7 @@ class FrameExtractorApp(tkinterdnd2.TkinterDnD.Tk):
         mode = self.radio_var.get()
         interval_str = self.entry_interval.get()
         interval = 1
+        frame_prefix = self.entry_frame_prefix.get().strip()
 
         use_custom_res = self.custom_resolution_var.get() == 1
         output_width = 0
@@ -321,6 +332,15 @@ class FrameExtractorApp(tkinterdnd2.TkinterDnD.Tk):
             output_width = int(width_str)
             output_height = int(height_str)
 
+        # 验证帧名称前缀
+        if not frame_prefix:
+            frame_prefix = "frame"  # 如果为空，使用默认值
+        # 检查前缀是否包含无效字符
+        invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
+        if any(char in frame_prefix for char in invalid_chars):
+            self.update_status("错误：帧名称前缀包含无效字符！请避免使用 < > : \" / \\ | ? * 等字符")
+            return
+
         # --- 禁用 UI 并开始处理 ---
         self.set_ui_state(False)
         self.update_progress(0)
@@ -330,13 +350,13 @@ class FrameExtractorApp(tkinterdnd2.TkinterDnD.Tk):
         extraction_thread = threading.Thread(
             target=self.extract_frames,
             args=(self.video_path, self.output_dir, mode, interval,
-                  use_custom_res, output_width, output_height), # 传递新参数
+                  use_custom_res, output_width, output_height, frame_prefix), # 传递新参数
             daemon=True
         )
         extraction_thread.start()
 
     def extract_frames(self, video_path, output_dir, mode, interval,
-                       use_custom_res, output_width, output_height): # 接收新参数
+                       use_custom_res, output_width, output_height, frame_prefix): # 接收新参数
         """
         在单独的线程中执行帧提取。
         """
@@ -371,8 +391,8 @@ class FrameExtractorApp(tkinterdnd2.TkinterDnD.Tk):
 
                 # 检查是否需要保存此帧
                 if (frame_count - 1) % step == 0:
-                    # 注意：保存的帧的文件名从 frame_000000 开始
-                    filename = f"frame_{saved_count:06d}{self.image_format}"
+                    # 注意：保存的帧的文件名使用自定义前缀
+                    filename = f"{frame_prefix}_{saved_count:06d}{self.image_format}"
                     output_path = os.path.join(output_dir, filename)
                     output_frame = frame # 默认使用原始帧
 
@@ -388,14 +408,28 @@ class FrameExtractorApp(tkinterdnd2.TkinterDnD.Tk):
                             write_failures += 1 # 计入失败
                             continue # 跳过此帧的保存尝试
 
-                    # 尝试保存帧（这个缩进需要在 if 块外！）
+                    # 尝试保存帧（使用支持中文路径的方法）
                     try:
-                        success = cv2.imwrite(output_path, output_frame)
+                        # 使用cv2.imencode + numpy方式支持中文路径
+                        # 获取文件扩展名对应的编码格式
+                        ext = self.image_format.lower()
+                        if ext == '.jpg' or ext == '.jpeg':
+                            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
+                        elif ext == '.png':
+                            encode_param = [int(cv2.IMWRITE_PNG_COMPRESSION), 3]
+                        else:
+                            encode_param = []
+                        
+                        # 编码图像
+                        success, encoded_img = cv2.imencode(ext, output_frame, encode_param)
                         if success:
+                            # 写入文件，支持中文路径
+                            with open(output_path, 'wb') as f:
+                                f.write(encoded_img.tobytes())
                             saved_count += 1 # 仅在成功时增加保存计数
                         else:
                             write_failures += 1 # 增加写入失败计数
-                            self.log_message(f"警告：无法写入帧 {frame_count} 到 {output_path}")
+                            self.log_message(f"警告：无法编码帧 {frame_count}")
                     except Exception as write_error:
                         write_failures += 1 # 增加写入失败计数
                         self.log_message(f"警告：写入帧 {frame_count} 到 {output_path} 时发生异常: {write_error}")
